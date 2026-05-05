@@ -137,7 +137,95 @@ async def import_sql_schemas(
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 
-@router.get("/api/v1/sql-schemas/count")
+@router.get("/api/v1/sql-schemas/select")
+async def select_sql_schema(
+    difficulty: str = "medium",
+    sql_category: str = "select",
+    domain: str | None = None,
+    limit: int = 10
+):
+    """
+    Select a random SQL schema matching the given criteria.
+    Used by backend schema_generator to get schemas for question generation.
+    """
+    try:
+        settings = get_settings()
+        client = _get_client()
+        db = client[settings.mongodb_db_name]
+        collection = db["sql_schemas"]
+
+        # Build query
+        query = {
+            "difficulty_levels": difficulty.lower(),
+            "sql_categories": sql_category.lower()
+        }
+        if domain:
+            query["domain"] = domain
+
+        # Get least recently used schemas
+        schemas = list(
+            collection.find(query)
+            .sort("usage_count", 1)
+            .limit(limit)
+        )
+
+        if not schemas:
+            # Fallback: try without difficulty filter
+            query_fallback = {"sql_categories": sql_category.lower()}
+            if domain:
+                query_fallback["domain"] = domain
+            schemas = list(
+                collection.find(query_fallback)
+                .sort("usage_count", 1)
+                .limit(limit)
+            )
+
+        if not schemas:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No schema found for difficulty='{difficulty}', category='{sql_category}', domain='{domain}'"
+            )
+
+        # Pick random from top results
+        import random
+        selected = random.choice(schemas)
+
+        # Convert ObjectId to string
+        selected["_id"] = str(selected["_id"])
+
+        return selected
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to select schema: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to select schema: {str(e)}")
+
+
+@router.post("/api/v1/sql-schemas/update-usage/{schema_id}")
+async def update_schema_usage(schema_id: str):
+    """
+    Increment usage count for a schema after it's been used for question generation.
+    """
+    try:
+        settings = get_settings()
+        client = _get_client()
+        db = client[settings.mongodb_db_name]
+        collection = db["sql_schemas"]
+
+        collection.update_one(
+            {"schema_id": schema_id},
+            {
+                "$inc": {"usage_count": 1},
+                "$set": {"last_used_at": datetime.utcnow()}
+            }
+        )
+
+        return {"success": True, "schema_id": schema_id}
+
+    except Exception as e:
+        logger.error(f"Failed to update schema usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update usage: {str(e)}")
 async def get_schema_count():
     """
     Get count of SQL schemas in MongoDB.
