@@ -30,6 +30,7 @@ class SchemaImportResponse(BaseModel):
     updated: int
     total: int
     message: str
+    errors: list = []
 
 
 @router.post("/api/v1/import-sql-schemas", response_model=SchemaImportResponse)
@@ -59,9 +60,12 @@ async def import_sql_schemas(
         db = client[settings.mongodb_db_name]
         collection = db["sql_schemas"]
         
-        # Create indexes
+        # Create indexes - use separate indexes for array fields
+        # MongoDB cannot create compound indexes on multiple array fields
         collection.create_index("schema_id", unique=True)
-        collection.create_index([("domain", 1), ("difficulty_levels", 1), ("sql_categories", 1)])
+        collection.create_index("domain")
+        collection.create_index("difficulty_levels")
+        collection.create_index("sql_categories")
         collection.create_index([("usage_count", 1), ("last_used_at", 1)])
         
         imported = 0
@@ -111,7 +115,8 @@ async def import_sql_schemas(
             imported=imported,
             updated=updated,
             total=total,
-            message=message
+            message=message,
+            errors=errors[:5]  # Return first 5 errors for debugging
         )
         
     except Exception as e:
