@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 _MIN_SCORE = 0.3
 # Lower threshold for competencies with short text entries (SQL, DSA)
 _MIN_SCORE_SQL = 0.15
+_MIN_SCORE_DSA = 0.15
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AIML Dataset Registry
@@ -215,7 +216,7 @@ def search(
                 continue
 
             # Skip low-confidence matches
-            min_score = _MIN_SCORE_SQL if competency == "sql" else _MIN_SCORE
+            min_score = _MIN_SCORE_SQL if competency == "sql" else _MIN_SCORE_DSA if competency == "dsa" else _MIN_SCORE
             if float(score) < min_score:
                 continue
 
