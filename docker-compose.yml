@@ -20,6 +20,7 @@ services:
       - "7003:7003"
     volumes:
       - ./data:/app/data        # FAISS indexes + catalog JSON files
+      - .:/app                  # Mount code so git pull takes effect immediately
     environment:
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DB_NAME: rag_db
