@@ -83,7 +83,7 @@ def _bulk_search(
                     break
                 if idx < 0 or idx >= len(meta):
                     continue
-                if float(score) < 0.2:
+                if float(score) < 0.1:
                     continue
 
                 entry_meta = meta[idx]
@@ -112,7 +112,13 @@ def _bulk_search(
                         entry_category = full_entry.get("sql_category", "").lower()
                         entry_tags = [t.lower() for t in full_entry.get("tags", [])]
                         entry_topics = [t.lower() for t in full_entry.get("topics", [])]
-                        if not any(c == entry_category or c in entry_tags or c in entry_topics for c in concepts_lower):
+                        # Use partial matching - concept can be substring of tag/topic
+                        if not any(
+                            c == entry_category or
+                            any(c in tag or tag in c for tag in entry_tags) or
+                            any(c in topic or topic in c for topic in entry_topics)
+                            for c in concepts_lower
+                        ):
                             continue
 
                     # Deduplicate by both title AND catalog position to handle index mismatches
@@ -141,7 +147,13 @@ def _bulk_search(
                 entry_category = e.get("sql_category", "").lower()
                 entry_tags = [t.lower() for t in e.get("tags", [])]
                 entry_topics = [t.lower() for t in e.get("topics", [])]
-                if not any(c == entry_category or c in entry_tags or c in entry_topics for c in concepts_lower):
+                # Use partial matching - concept can be substring of tag/topic
+                if not any(
+                    c == entry_category or
+                    any(c in tag or tag in c for tag in entry_tags) or
+                    any(c in topic or topic in c for topic in entry_topics)
+                    for c in concepts_lower
+                ):
                     continue
             diff_candidates.append((i, e))
         logger.info("Random fallback: %d candidates for difficulty='%s' in %d catalog entries", len(diff_candidates), difficulty_lower, len(catalog))
