@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.settings import get_settings
 from core import state
-from api.routes import retrieve, retrieve_bulk, rebuild, ingest, health, catalog
+from api.routes import retrieve, retrieve_bulk, rebuild, ingest, health, catalog, schema_import
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,3 +54,4 @@ app.include_router(retrieve_bulk.router)
 app.include_router(rebuild.router)
 app.include_router(ingest.router)
 app.include_router(catalog.router)
+app.include_router(schema_import.router)
