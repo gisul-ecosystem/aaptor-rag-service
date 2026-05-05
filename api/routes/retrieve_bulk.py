@@ -112,11 +112,18 @@ def _bulk_search(
                         entry_category = full_entry.get("sql_category", "").lower()
                         entry_tags = [t.lower() for t in full_entry.get("tags", [])]
                         entry_topics = [t.lower() for t in full_entry.get("topics", [])]
-                        # Use partial matching - concept can be substring of tag/topic
+                        # Abbreviation map for common DSA concepts
+                        abbrev_map = {
+                            "bfs": "breadth", "dfs": "depth", "dp": "dynamic",
+                            "bs": "binary search", "ll": "linked list"
+                        }
+                        expanded = [abbrev_map.get(c, c) for c in concepts_lower]
                         if not any(
                             c == entry_category or
+                            any(c in tag or tag in c or e in tag for tag in entry_tags for e in [expanded[i]] for i, orig in enumerate(concepts_lower) if orig == c) or
                             any(c in tag or tag in c for tag in entry_tags) or
-                            any(c in topic or topic in c for topic in entry_topics)
+                            any(c in topic or topic in c for topic in entry_topics) or
+                            any(e in tag for tag in entry_tags for e in expanded)
                             for c in concepts_lower
                         ):
                             continue
@@ -147,11 +154,17 @@ def _bulk_search(
                 entry_category = e.get("sql_category", "").lower()
                 entry_tags = [t.lower() for t in e.get("tags", [])]
                 entry_topics = [t.lower() for t in e.get("topics", [])]
-                # Use partial matching - concept can be substring of tag/topic
+                # Abbreviation map for common DSA concepts
+                abbrev_map = {
+                    "bfs": "breadth", "dfs": "depth", "dp": "dynamic",
+                    "bs": "binary search", "ll": "linked list"
+                }
+                expanded = [abbrev_map.get(c, c) for c in concepts_lower]
                 if not any(
                     c == entry_category or
                     any(c in tag or tag in c for tag in entry_tags) or
-                    any(c in topic or topic in c for topic in entry_topics)
+                    any(c in topic or topic in c for topic in entry_topics) or
+                    any(exp in tag for tag in entry_tags for exp in expanded)
                     for c in concepts_lower
                 ):
                     continue
