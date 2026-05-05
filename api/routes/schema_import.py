@@ -63,6 +63,13 @@ async def import_sql_schemas(
         # Create indexes ONCE before importing - use separate indexes for array fields
         # MongoDB cannot create compound indexes on multiple array fields (parallel arrays error)
         try:
+            # Drop any existing bad compound index that may have been created
+            try:
+                collection.drop_index("domain_1_difficulty_levels_1_sql_categories_1")
+            except Exception:
+                pass  # Index may not exist, that's fine
+            
+            # Create separate single-field indexes (safe for array fields)
             collection.create_index("schema_id", unique=True)
             collection.create_index("domain")
             collection.create_index("difficulty_levels")
