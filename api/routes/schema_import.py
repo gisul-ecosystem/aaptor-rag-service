@@ -60,13 +60,16 @@ async def import_sql_schemas(
         db = client[settings.mongodb_db_name]
         collection = db["sql_schemas"]
         
-        # Create indexes - use separate indexes for array fields
-        # MongoDB cannot create compound indexes on multiple array fields
-        collection.create_index("schema_id", unique=True)
-        collection.create_index("domain")
-        collection.create_index("difficulty_levels")
-        collection.create_index("sql_categories")
-        collection.create_index([("usage_count", 1), ("last_used_at", 1)])
+        # Create indexes ONCE before importing - use separate indexes for array fields
+        # MongoDB cannot create compound indexes on multiple array fields (parallel arrays error)
+        try:
+            collection.create_index("schema_id", unique=True)
+            collection.create_index("domain")
+            collection.create_index("difficulty_levels")
+            collection.create_index("sql_categories")
+            collection.create_index([("usage_count", 1), ("last_used_at", 1)])
+        except Exception as idx_err:
+            logger.warning(f"Index creation warning (non-fatal): {idx_err}")
         
         imported = 0
         updated = 0
@@ -94,6 +97,9 @@ async def import_sql_schemas(
                 if result.upserted_id:
                     imported += 1
                 elif result.modified_count > 0:
+                    updated += 1
+                else:
+                    # Document exists but no changes
                     updated += 1
                     
             except Exception as e:
