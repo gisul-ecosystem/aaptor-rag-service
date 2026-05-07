@@ -396,3 +396,95 @@ async def get_schema_stats():
     except Exception as e:
         logger.error(f"Failed to get schema stats: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
+@router.get("/api/v1/sql-schemas/list")
+async def list_sql_schemas(
+    limit: int = 200,
+    skip: int = 0,
+    domain: str | None = None,
+    fields: str = "schema_id,domain,sample_data_row_counts",
+):
+    """
+    List all SQL schemas with optional filtering.
+    Returns schema_id, domain, and sample data row counts for verification.
+
+    Query params:
+    - limit: max schemas to return (default 200, max 500)
+    - skip: pagination offset
+    - domain: filter by domain
+    - fields: comma-separated fields to return (default: schema_id,domain,sample_data_row_counts)
+    """
+    try:
+        settings = get_settings()
+        client = _get_client()
+        db = client[settings.mongodb_db_name]
+        collection = db["sql_schemas"]
+
+        limit = min(limit, 500)
+
+        # Build query
+        query = {}
+        if domain:
+            query["domain"] = domain
+
+        # Determine projection based on requested fields
+        field_list = [f.strip() for f in fields.split(",")]
+        projection = {"_id": 0, "schema_id": 1, "domain": 1}
+
+        # Always include sample_data if row counts requested
+        include_sample_data = "sample_data_row_counts" in field_list or "sample_data" in field_list
+        if include_sample_data:
+            projection["sample_data"] = 1
+
+        # Include other requested fields
+        for f in field_list:
+            if f not in ("sample_data_row_counts", "schema_id", "domain"):
+                projection[f] = 1
+
+        schemas = list(
+            collection.find(query, projection)
+            .sort("schema_id", 1)
+            .skip(skip)
+            .limit(limit)
+        )
+
+        total = collection.count_documents(query)
+
+        # Build response — compute row counts if requested
+        results = []
+        for s in schemas:
+            entry = {
+                "schema_id": s.get("schema_id"),
+                "domain": s.get("domain"),
+            }
+
+            if include_sample_data:
+                sample_data = s.get("sample_data", {})
+                row_counts = {t: len(rows) for t, rows in sample_data.items()}
+                total_rows = sum(row_counts.values())
+                min_rows = min(row_counts.values()) if row_counts else 0
+                entry["sample_data_row_counts"] = row_counts
+                entry["total_rows"] = total_rows
+                entry["min_rows_per_table"] = min_rows
+                entry["tables_count"] = len(row_counts)
+
+            # Include any other requested fields
+            for f in field_list:
+                if f not in ("sample_data_row_counts", "schema_id", "domain", "sample_data"):
+                    if f in s:
+                        entry[f] = s[f]
+
+            results.append(entry)
+
+        return {
+            "total": total,
+            "returned": len(results),
+            "skip": skip,
+            "limit": limit,
+            "schemas": results,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list schemas: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list schemas: {str(e)}")
