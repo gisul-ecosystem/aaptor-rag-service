@@ -226,6 +226,107 @@ async def update_schema_usage(schema_id: str):
     except Exception as e:
         logger.error(f"Failed to update schema usage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update usage: {str(e)}")
+
+
+@router.delete("/api/v1/sql-schemas/bulk-delete")
+async def bulk_delete_schemas(
+    x_admin_api_key: str | None = Header(None, alias="X-Admin-Api-Key"),
+    source_quality: str | None = None,
+    source: str | None = None,
+    min_columns: int | None = None,
+    max_columns: int | None = None,
+    drop_all: bool = False
+):
+    """
+    Bulk delete SQL schemas from MongoDB based on filters.
+    
+    Requires admin API key for authentication.
+    
+    Query params:
+    - source_quality: Delete schemas with this source_quality (e.g., "spider_benchmark")
+    - source: Delete schemas from this source (e.g., "sql_dataset_clean_v2.json")
+    - min_columns: Delete schemas with fewer than this many columns
+    - max_columns: Delete schemas with more than this many columns
+    - drop_all: If true, drops the entire collection (use with caution!)
+    
+    Examples:
+    - Delete all junk schemas with < 10 columns: ?min_columns=10
+    - Delete all from bad source: ?source=sql_dataset_clean_v2.json
+    - Drop entire collection: ?drop_all=true
+    """
+    settings = get_settings()
+    if settings.admin_api_key and x_admin_api_key != settings.admin_api_key:
+        raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
+    
+    try:
+        client = _get_client()
+        db = client[settings.mongodb_db_name]
+        collection = db["sql_schemas"]
+        
+        if drop_all:
+            # Drop entire collection
+            count_before = collection.count_documents({})
+            collection.drop()
+            logger.warning(f"Dropped entire sql_schemas collection ({count_before} schemas)")
+            return {
+                "success": True,
+                "deleted": count_before,
+                "message": f"Dropped entire collection ({count_before} schemas)"
+            }
+        
+        # Build delete query
+        query = {}
+        
+        if source_quality:
+            query["source_quality"] = {"$ne": source_quality}  # Delete everything NOT matching
+        
+        if source:
+            query["source"] = source
+        
+        if min_columns is not None:
+            query["metadata.total_columns"] = {"$lt": min_columns}
+        
+        if max_columns is not None:
+            if "metadata.total_columns" in query:
+                query["metadata.total_columns"]["$gt"] = max_columns
+            else:
+                query["metadata.total_columns"] = {"$gt": max_columns}
+        
+        if not query:
+            raise HTTPException(
+                status_code=400,
+                detail="No filter provided. Use source_quality, source, min_columns, max_columns, or drop_all=true"
+            )
+        
+        # Count before delete
+        count_to_delete = collection.count_documents(query)
+        
+        if count_to_delete == 0:
+            return {
+                "success": True,
+                "deleted": 0,
+                "message": "No schemas matched the filter"
+            }
+        
+        # Delete
+        result = collection.delete_many(query)
+        
+        logger.info(f"Bulk deleted {result.deleted_count} schemas with query: {query}")
+        
+        return {
+            "success": True,
+            "deleted": result.deleted_count,
+            "message": f"Deleted {result.deleted_count} schemas",
+            "query": str(query)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bulk delete failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Bulk delete failed: {str(e)}")
+
+
 async def get_schema_count():
     """
     Get count of SQL schemas in MongoDB.
