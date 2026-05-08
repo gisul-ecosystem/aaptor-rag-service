@@ -142,11 +142,20 @@ async def select_sql_schema(
     difficulty: str = "medium",
     sql_category: str = "select",
     domain: str | None = None,
-    limit: int = 10
+    limit: int = 30,
+    max_tables: int | None = None,
+    min_columns: int | None = None,
+    exclude_ids: str | None = None,
 ):
     """
     Select a random SQL schema matching the given criteria.
     Used by backend schema_generator to get schemas for question generation.
+
+    Params:
+    - limit: pool size to pick from (default 30 for better variety)
+    - max_tables: exclude schemas with more than N tables (avoids complex schemas)
+    - min_columns: exclude schemas with fewer than N total columns
+    - exclude_ids: comma-separated schema_ids to exclude (e.g. known-bad schemas)
     """
     try:
         settings = get_settings()
@@ -154,15 +163,26 @@ async def select_sql_schema(
         db = client[settings.mongodb_db_name]
         collection = db["sql_schemas"]
 
-        # Build query
+        # Parse exclude list
+        excluded = set()
+        if exclude_ids:
+            excluded = {s.strip() for s in exclude_ids.split(",") if s.strip()}
+
+        # Build base query
         query = {
             "difficulty_levels": difficulty.lower(),
             "sql_categories": sql_category.lower()
         }
         if domain:
             query["domain"] = domain
+        if max_tables is not None:
+            query["metadata.table_count"] = {"$lte": max_tables}
+        if min_columns is not None:
+            query["metadata.total_columns"] = {"$gte": min_columns}
+        if excluded:
+            query["schema_id"] = {"$nin": list(excluded)}
 
-        # Get least recently used schemas
+        # Get least recently used schemas (LRU — ensures variety)
         schemas = list(
             collection.find(query)
             .sort("usage_count", 1)
@@ -170,12 +190,27 @@ async def select_sql_schema(
         )
 
         if not schemas:
-            # Fallback: try without difficulty filter
+            # Fallback 1: try without difficulty filter
             query_fallback = {"sql_categories": sql_category.lower()}
             if domain:
                 query_fallback["domain"] = domain
+            if max_tables is not None:
+                query_fallback["metadata.table_count"] = {"$lte": max_tables}
+            if excluded:
+                query_fallback["schema_id"] = {"$nin": list(excluded)}
             schemas = list(
                 collection.find(query_fallback)
+                .sort("usage_count", 1)
+                .limit(limit)
+            )
+
+        if not schemas:
+            # Fallback 2: drop all filters except category
+            query_minimal = {"sql_categories": sql_category.lower()}
+            if excluded:
+                query_minimal["schema_id"] = {"$nin": list(excluded)}
+            schemas = list(
+                collection.find(query_minimal)
                 .sort("usage_count", 1)
                 .limit(limit)
             )
@@ -186,7 +221,7 @@ async def select_sql_schema(
                 detail=f"No schema found for difficulty='{difficulty}', category='{sql_category}', domain='{domain}'"
             )
 
-        # Pick random from top results
+        # Pick random from pool (LRU ensures underused schemas get priority)
         import random
         selected = random.choice(schemas)
 
