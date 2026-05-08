@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Data files — mounted as volume at runtime, not baked into image
+data/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docs & scripts not needed in image
+README.md
+scripts/
+
+# Editor / OS
+.vscode/
+.DS_Store
+*.Zone.Identifier
