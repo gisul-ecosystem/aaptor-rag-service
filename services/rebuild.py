@@ -25,6 +25,7 @@ async def rebuild_index(
     catalog_path = s.catalog_path(competency)
     faiss_path = s.faiss_path(competency)
     meta_path = s.metadata_path(competency)
+    faiss_path.parent.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
 
@@ -32,6 +33,14 @@ async def rebuild_index(
     from db import mongo
     catalog = mongo.load_all(competency)
     if not catalog:
+        if not catalog_path.exists():
+            logger.warning("No MongoDB or JSON catalog found for '%s'", competency)
+            return {
+                "competency": competency,
+                "vectors": 0,
+                "catalog_entries": 0,
+                "time_seconds": round(time.time() - t0, 2),
+            }
         logger.info("MongoDB empty for '%s' — loading from JSON file", competency)
         with open(catalog_path, encoding="utf-8") as f:
             catalog = json.load(f)
@@ -51,7 +60,9 @@ async def rebuild_index(
         text = " ".join([
             entry.get("name", ""),
             entry.get("title", ""),
+            entry.get("question", ""),         # MCQ
             entry.get("description", ""),
+            entry.get("explanation", ""),      # MCQ
             entry.get("problem_description", ""),
             entry.get("context", ""),          # DevOps
             entry.get("use_case", ""),
@@ -64,6 +75,7 @@ async def rebuild_index(
             " ".join(entry.get("tags", [])),
             " ".join(entry.get("topics", [])),
             entry.get("domain", ""),
+            entry.get("category", ""),         # MCQ
         ])
         texts.append(text)
         diff = entry.get("difficulty", "Medium")

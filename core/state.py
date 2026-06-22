@@ -9,7 +9,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Supported competencies — add new ones here as datasets are added
-COMPETENCIES = ["aiml", "dsa", "devops", "data_engineering", "design", "prompt_engineering", "cloud", "fullstack", "sql"]
+COMPETENCIES = ["aiml", "dsa", "devops", "data_engineering", "design", "prompt_engineering", "cloud", "fullstack", "sql", "mcq"]
 
 # Loaded indexes per competency
 indexes: dict[str, Any] = {}        # faiss index objects
