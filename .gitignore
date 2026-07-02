@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .env
 venv/
+
+# ── Generated index & catalog files (built at runtime, not stored in git) ──
 data/aiml/catalog.json
 data/aiml/faiss.index
 data/aiml/metadata.json
@@ -9,4 +11,14 @@ data/dsa/catalog.json
 data/dsa/faiss.index
 data/dsa/metadata.json
 *.index
+
+# ── Large raw dataset files — store in Docker volume, not in git ──
+data/**/*.jsonl
+data/**/*.json
+data/**/*.csv
+data/**/*.parquet
+
+# ── OS / editor noise ──
 *.Zone.Identifier
+.DS_Store
+.vscode/
