@@ -16,7 +16,7 @@ fake = Faker()
 Faker.seed(42)
 random.seed(42)
 
-RAG_URL = "http://103.173.99.217:7003"
+RAG_URL = "http://103.99.38.144:7003"
 ADMIN_KEY = "adm_7DO6mYfMDUvUayUCfx-jGlwUWnzH5PVXtnAwYEMTS9IhhCwg"
 ROWS_PER_TABLE = 100
 
@@ -365,62 +365,43 @@ def generate_sample_data(schema: dict, rows_per_table: int = ROWS_PER_TABLE) -> 
 
 
 def fetch_all_schemas() -> list:
-    """Fetch all schemas using the /list endpoint (fastest — single request)."""
+    """Fetch all schemas using the /list endpoint with pagination."""
     print("Fetching all schemas via list endpoint...")
     try:
-        resp = requests.get(f"{RAG_URL}/api/v1/sql-schemas/list?limit=200", timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        schema_summaries = data.get("schemas", [])
-        total = data.get("total", 0)
-        print(f"Total schemas: {total}, fetched summaries: {len(schema_summaries)}")
+        all_schemas = []
+        limit = 500
+        skip = 0
+        while True:
+            resp = requests.get(
+                f"{RAG_URL}/api/v1/sql-schemas/list",
+                params={
+                    "limit": limit,
+                    "skip": skip,
+                    "fields": "schema_id,domain,tables,relationships,difficulty_levels,sql_categories,source,sample_data",
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            schemas = data.get("schemas", [])
+            total = data.get("total", 0)
+            print(f"  page skip={skip} returned {len(schemas)} schemas")
 
-        # The list endpoint returns summaries (no full tables/sample_data)
-        # We need full schemas — fetch each one by schema_id via select
-        # But that's slow. Instead, fetch by domain in batches using select
-        # with high limit to get full schema data
-        all_schemas = {}
-        domains = list({s.get("domain") for s in schema_summaries if s.get("domain")})
-        print(f"Fetching full schemas for {len(domains)} domains...")
+            if not schemas:
+                break
 
-        for domain in domains:
-            for cat in ["select"]:  # one category is enough to get the schema
-                try:
-                    r = requests.get(f"{RAG_URL}/api/v1/sql-schemas/select",
-                                     params={"sql_category": cat, "domain": domain, "limit": 10},
-                                     timeout=30)
-                    if r.status_code == 200:
-                        s = r.json()
-                        sid = s.get("schema_id")
-                        if sid and sid not in all_schemas:
-                            all_schemas[sid] = s
-                except Exception:
-                    pass
+            for schema in schemas:
+                # Some legacy entries may not have a proper schema definition.
+                if not schema.get("tables"):
+                    continue
+                all_schemas.append(schema)
 
-        # For schemas not yet fetched, try other categories
-        fetched_ids = set(all_schemas.keys())
-        missing_ids = {s["schema_id"] for s in schema_summaries} - fetched_ids
-        if missing_ids:
-            print(f"Fetching {len(missing_ids)} remaining schemas...")
-            for domain in domains:
-                for cat in ["join", "aggregation", "subquery", "window", "cte"]:
-                    if not missing_ids:
-                        break
-                    try:
-                        r = requests.get(f"{RAG_URL}/api/v1/sql-schemas/select",
-                                         params={"sql_category": cat, "domain": domain, "limit": 10},
-                                         timeout=30)
-                        if r.status_code == 200:
-                            s = r.json()
-                            sid = s.get("schema_id")
-                            if sid and sid not in all_schemas:
-                                all_schemas[sid] = s
-                                missing_ids.discard(sid)
-                    except Exception:
-                        pass
+            skip += limit
+            if skip >= total:
+                break
 
-        print(f"Fetched {len(all_schemas)} full schemas")
-        return list(all_schemas.values())
+        print(f"Fetched {len(all_schemas)} full schemas (total available: {total})")
+        return all_schemas
     except Exception as e:
         print(f"Failed to fetch schemas: {e}")
         return []

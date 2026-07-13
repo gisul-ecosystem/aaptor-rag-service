@@ -66,26 +66,41 @@ def _stable_id(question: str, source_id: Any) -> str:
 
 
 def _normalize_question(item: dict[str, Any]) -> dict[str, Any] | None:
-    question = _clean_text(item.get("question"))
+    question = _clean_text(item.get("question") or item.get("text"))
     if not question:
         return None
 
-    answers = item.get("answers") or {}
-    correct_answers = item.get("correct_answers") or {}
     options: list[dict[str, Any]] = []
 
-    for index, answer_key in enumerate(ANSWER_KEYS):
-        text = _clean_text(answers.get(answer_key))
-        if not text:
-            continue
-        is_correct = str(correct_answers.get(f"{answer_key}_correct", "false")).lower() == "true"
-        options.append(
-            {
-                "label": chr(ord("A") + index),
-                "text": text,
-                "isCorrect": is_correct,
-            }
-        )
+    answers = item.get("answers") or {}
+    if isinstance(answers, list):
+        for index, answer in enumerate(answers[:6]):
+            if not isinstance(answer, dict):
+                continue
+            text = _clean_text(answer.get("text"))
+            if not text:
+                continue
+            options.append(
+                {
+                    "label": chr(ord("A") + index),
+                    "text": text,
+                    "isCorrect": bool(answer.get("isCorrect")),
+                }
+            )
+    elif isinstance(answers, dict):
+        correct_answers = item.get("correct_answers") or {}
+        for index, answer_key in enumerate(ANSWER_KEYS):
+            text = _clean_text(answers.get(answer_key))
+            if not text:
+                continue
+            is_correct = str(correct_answers.get(f"{answer_key}_correct", "false")).lower() == "true"
+            options.append(
+                {
+                    "label": chr(ord("A") + index),
+                    "text": text,
+                    "isCorrect": is_correct,
+                }
+            )
 
     if len(options) < 4:
         return None
@@ -120,7 +135,7 @@ def _normalize_question(item: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "id": doc_id,
         "source": "quizapi.io",
-        "source_id": str(source_id or ""),
+        "source_id": str(source_id or item.get("quizId") or ""),
         "title": question[:160],
         "question": question,
         "description": _clean_text(item.get("description")),
@@ -132,6 +147,8 @@ def _normalize_question(item: dict[str, Any]) -> dict[str, Any] | None:
         "tags": tags,
         "topics": topic_parts,
         "multiple_correct_answers": False,
+        "quiz_id": _clean_text(item.get("quizId")),
+        "quiz_title": _clean_text(item.get("quizTitle")),
         "source_url": "https://quizapi.io",
     }
 
@@ -142,19 +159,30 @@ async def _fetch_batch(
     category: str,
     difficulty: str,
     limit: int,
-) -> list[dict[str, Any]]:
+    offset: int,
+) -> list[dict[str, Any]] | None:
     response = await client.get(
         QUIZAPI_URL,
         params={
-            "apiKey": api_key,
+            "api_key": api_key,
             "category": category,
             "difficulty": difficulty.lower(),
             "limit": limit,
+            "offset": offset,
             "single_answer_only": "true",
         },
     )
+    if response.status_code == 429:
+        retry_after = response.headers.get("retry-after", "")
+        message = "[RATE_LIMIT] QuizAPI returned 429 Too Many Requests"
+        if retry_after:
+            message += f"; retry_after={retry_after}s"
+        print(message)
+        return None
     response.raise_for_status()
     data = response.json()
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return data["data"]
     if not isinstance(data, list):
         raise RuntimeError(f"Unexpected QuizAPI response for {category}/{difficulty}: {data!r}")
     return data
@@ -165,23 +193,47 @@ async def fetch_quizapi_entries(
     categories: list[str],
     difficulties: list[str],
     limit: int,
+    max_pages: int,
     pause_seconds: float,
 ) -> list[dict[str, Any]]:
     entries_by_id: dict[str, dict[str, Any]] = {}
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         for category in categories:
             for difficulty in difficulties:
-                print(f"[FETCH] category={category} difficulty={difficulty} limit={limit}")
-                batch = await _fetch_batch(client, api_key, category, difficulty, limit)
-                kept = 0
-                for item in batch:
-                    normalized = _normalize_question(item)
-                    if normalized:
-                        entries_by_id[normalized["id"]] = normalized
-                        kept += 1
-                print(f"[OK] received={len(batch)} normalized={kept} total_unique={len(entries_by_id)}")
-                if pause_seconds > 0:
-                    time.sleep(pause_seconds)
+                for page in range(max_pages):
+                    offset = page * limit
+                    print(
+                        f"[FETCH] category={category} difficulty={difficulty} "
+                        f"limit={limit} offset={offset}"
+                    )
+                    batch = await _fetch_batch(client, api_key, category, difficulty, limit, offset)
+                    if batch is None:
+                        print(
+                            "[STOP] rate limit reached; returning collected entries "
+                            f"total_unique={len(entries_by_id)}"
+                        )
+                        return list(entries_by_id.values())
+                    if not batch:
+                        print(f"[STOP] empty page category={category} difficulty={difficulty} offset={offset}")
+                        break
+
+                    kept = 0
+                    before = len(entries_by_id)
+                    for item in batch:
+                        normalized = _normalize_question(item)
+                        if normalized:
+                            entries_by_id[normalized["id"]] = normalized
+                            kept += 1
+                    added = len(entries_by_id) - before
+                    print(
+                        f"[OK] received={len(batch)} normalized={kept} "
+                        f"added={added} total_unique={len(entries_by_id)}"
+                    )
+                    if len(batch) < limit:
+                        print(f"[STOP] final page category={category} difficulty={difficulty}")
+                        break
+                    if pause_seconds > 0:
+                        time.sleep(pause_seconds)
     return list(entries_by_id.values())
 
 
@@ -209,6 +261,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--category", action="append", dest="categories", help="Category to fetch; can repeat")
     parser.add_argument("--difficulty", action="append", dest="difficulties", help="Difficulty to fetch; can repeat")
     parser.add_argument("--limit", type=int, default=20, help="Questions per category/difficulty request")
+    parser.add_argument("--max-pages", type=int, default=1, help="Pages to fetch per category/difficulty")
     parser.add_argument("--pause-seconds", type=float, default=0.5, help="Delay between QuizAPI calls")
     parser.add_argument("--service-url", default=os.getenv("RAG_SERVICE_URL", "http://127.0.0.1:7003"))
     parser.add_argument("--admin-api-key", default=os.getenv("ADMIN_API_KEY", ""))
@@ -229,6 +282,7 @@ async def main() -> None:
         categories=categories,
         difficulties=difficulties,
         limit=args.limit,
+        max_pages=args.max_pages,
         pause_seconds=args.pause_seconds,
     )
 

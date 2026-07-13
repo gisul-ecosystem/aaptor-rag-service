@@ -29,8 +29,11 @@ async def list_catalog(
             e for e in catalog
             if s in str(e.get("name", "")).lower()
             or s in str(e.get("title", "")).lower()
+            or s in str(e.get("question", "")).lower()
             or s in str(e.get("description", "")).lower()
             or s in str(e.get("problem_description", "")).lower()
+            or s in str(e.get("category", "")).lower()
+            or s in str(e.get("quiz_title", "")).lower()
             or any(s in str(t).lower() for t in e.get("tags", []))
         ]
 
